@@ -13,20 +13,24 @@ permissions:
 
 jobs:
   bundle:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
         with: { distribution: temurin, java-version: '21' }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with: { node-version: '22' }
-      - uses: android-actions/setup-android@v3
-      - uses: gradle/actions/setup-gradle@v4
-        with: { gradle-version: '8.14.3' }
+      # ubuntu-24.04 images ship the Android SDK; just add what this app needs
+      - name: Android SDK packages
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" "platforms;android-36" "build-tools;36.0.0" "platform-tools" > /dev/null
 
       - run: npm ci
       - run: npx cap sync android
-      - run: gradle -p android bundleRelease --no-daemon
+      - run: cd android && chmod +x gradlew && ./gradlew bundleRelease --no-daemon
 
       - name: Publish bundle to aab-build branch
         run: |
