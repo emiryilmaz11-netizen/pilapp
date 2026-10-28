@@ -1220,6 +1220,18 @@ function migrate(db){
     db.schemaVersion = 7;
   }
 
+  /* v2 öncesi kurulumlarda stüdyonun başlangıç tarihi yok: hoca ders sayısı
+     ve doluluk kurulumdan önceki haftaları da sayıyordu. En eski kayıttan
+     (işlem geçmişi, hak defteri, rezervasyon) tahmin edilir. */
+  if (db.studio && !db.studio.createdAt){
+    const tarihler = [
+      ...(db.log||[]).map(x=>String(x.at||'').slice(0,10)),
+      ...(db.ledger||[]).map(x=>String(x.date||'').slice(0,10)),
+      ...(db.bookings||[]).map(x=>String(x.key||'').split('|')[1]||'')
+    ].filter(x=>/^\d{4}-\d{2}-\d{2}$/.test(x)).sort();
+    if (tarihler.length) db.studio.createdAt = tarihler[0];
+  }
+
   // her koleksiyon mutlaka dizi olsun — bozuk yedek arayüzü kilitlemesin
   ['rooms','trainers','services','packages','series','extra','members',
    'plans','bookings','ledger','payments','off','closed','log','standing','timeoff']
@@ -1326,6 +1338,11 @@ function logUndo(logId){
   else if (u.kind === 'series_remove'){
     u.items.forEach(x=>{ if (!DB.series.some(y=>y.id===x.id)) DB.series.push(x); });
     mesaj = `${u.items.length} ders saati geri yüklendi`;
+  }
+  else if (u.kind === 'class_cancel'){
+    DB.off = (DB.off||[]).filter(o=>!(o.seriesId===u.seriesId && o.date===u.date));
+    mesaj = T('Ders yeniden açıldı — iptal edilen kayıtlar geri gelmez',
+              'The class was reopened — cancelled bookings do not come back');
   }
   else if (u.kind === 'standing'){
     stopStanding(u.standingId, true);
@@ -1649,7 +1666,7 @@ const DICT = {
 "Kredi kartı":"Credit card","Kullanılabilir paketin yok":"You have no usable package",
 "Kuralları kaydet":"Save rules","Kurulum adımları":"Setup steps","Kurulum tamamlandı":"Setup complete",
 "Mat":"Mat","Menü":"Menu","Müsait":"Available","Nakit":"Cash","Havale/EFT":"Bank transfer",
-"Net satış":"Net price","Net tutar":"Net amount","Not (sakatlık, dikkat edilecekler)":"Note (injuries, things to watch)",
+"Net satış":"Net price","Liste fiyatı":"List price","İndirim":"Discount","Kalan borç":"Balance due","Başlangıç tarihi":"Start date","Net tutar":"Net amount","Not (sakatlık, dikkat edilecekler)":"Note (injuries, things to watch)",
 "Not güncellendi":"Note updated","Notu düzenle":"Edit note","Otomatik yedeğe dön":"Restore the automatic backup",
 "Ortalama doluluk":"Average occupancy","Paket":"Package","Paket adı":"Package name",
 "Paket adı gerekli":"The package name is required","Paket bulunamadı, geri alınamadı":"The package was not found, so this could not be undone",
@@ -1845,7 +1862,9 @@ const I18N_PATS = [
   [/^Veri şeması sürümü: v(\d+)\. Sıfırlama ve geri yükleme öncesi otomatik kopya alınır\.$/,
      m=>`Data schema version v${m[1]}. An automatic copy is taken before any reset or restore.`],
   [/^Örnek: (.+)$/,                 m=>`Example: ${m[1]}`],
-  [/^(\d+) ders · (\d+) kişi$/,    m=>`${m[1]} classes · ${m[2]} people`]
+  [/^(\d+) ders · (\d+) kişi$/,    m=>`${m[1]} classes · ${m[2]} people`],
+  /* Satış formundaki numaralı adımlar: "3 · Başlangıç tarihi" */
+  [/^(\d+) · (.+)$/,                m=>DICT[m[2]] ? `${m[1]} · ${DICT[m[2]]}` : null]
 ];
 
 /* Kullanıcının kendi yazdığı adlar — asla çevrilmez.
@@ -3004,7 +3023,7 @@ function classSheet(key){
   const al = $('#all'); if (al) al.onclick = () => {
     let n=0; bookingsOf(key).forEach(x=>{ if (x.status==='booked'){ settleBooking(x,'attended'); n++; } });
     save(); closeAll(); route(); toast(`${n} kişi geldi olarak işaretlendi`); };
-  $('#cx').onclick = () => { closeAll(); day = new Date(dISO+'T00:00:00'); cancelClass(sid); };
+  $('#cx').onclick = () => { closeAll(); day = new Date(dISO+'T00:00:00'); cancelClass(sid, dISO); };
 }
 
 const calWeek = () => viewWeek();
@@ -3482,6 +3501,50 @@ function askCloseDay(dISO){
   $('#ok').onclick = () => { closeAll(); closeDay(dISO); };
 }
 
+/* Tek dersi iptal et — o günün o saati düşer, kayıtlıların hakkı kurala
+   göre iade edilir (Ayarlar › Stüdyo iptalinde hak iade edilsin). */
+function cancelClass(sid, dISO){
+  dISO = dISO || iso(day);
+  const ser = DB.series.find(x=>x.id===sid) || (DB.extra||[]).find(x=>x.id===sid);
+  if (!ser) return toast(T('Ders bulunamadı','Class not found'), true);
+  const key = sid+'|'+dISO;
+  const n = bookingsOf(key).filter(b=>b.status!=='waitlist').length;
+  const ref = rules().refundStudioCancel;
+  openModal(`<div class="mhead"><div class="row sp">
+      <div><div style="font-weight:600;font-size:16px">Dersi iptal et</div>
+      <div class="lbl">${esc(svc(ser.serviceId)?.name||'')} · ${fmtDate(new Date(dISO+'T00:00:00'))} ${ser.time}</div></div>
+      <button class="btn sm" data-close>Vazgeç</button></div></div>
+    <div class="mbody">
+      <p style="margin:0 0 14px">${n
+        ? T(`Bu derste <b>${n} kayıt</b> var. İptal edersen ${ref
+              ? 'hepsinin hakkı geri yüklenir.' : 'kurala göre hakları yanar.'}`,
+            `<b>${n} bookings</b> in this class. If you cancel, ${ref
+              ? 'everyone gets their credit back.' : 'credits are charged per your rules.'}`)
+        : T('Bu derse kayıt yok. İptal edersen öğrenciler bu dersi görmez.',
+            'No one is booked. If you cancel, members will not see this class.')}</p>
+      <button class="btn stop" id="ok" style="width:100%">Dersi iptal et</button></div>`);
+  $('#ok').onclick = () => {
+    closeAll();
+    let bks = 0;
+    bookingsOf(key).forEach(b=>{
+      settleBooking(b, 'cancelled', ref ? 'refund' : 'charge');
+      bks++;
+      if (b.memberId && mem(b.memberId)?.phone)
+        DB.notify = (DB.notify||[]).concat([{ id:uid(), memberId:b.memberId,
+          key, kind:'ders_iptal', at:new Date().toISOString() }]);
+    });
+    DB.off = DB.off || [];
+    if (!DB.off.some(o=>o.seriesId===sid && o.date===dISO))
+      DB.off.push({ seriesId:sid, date:dISO });
+    logAct('class_cancelled',
+      `${svc(ser.serviceId)?.name||''} · ${fmtDate(new Date(dISO+'T00:00:00'))} ${ser.time} · ${bks} rezervasyon iptal`,
+      { kind:'class_cancel', seriesId:sid, date:dISO });
+    save(); route();
+    toast(bks ? T(`Ders iptal edildi, ${bks} kayıt düştü`, `Class cancelled, ${bks} bookings removed`)
+              : T('Ders iptal edildi','Class cancelled'));
+  };
+}
+
 function askCloseWeek(mondayISO){
   const start = new Date(mondayISO+'T00:00:00');
   const days = Array.from({length:7},(_,i)=>iso(addDays(start,i)));
@@ -3896,25 +3959,25 @@ function sellModal(preId, onDone){
         <p class="lbl" style="margin:5px 0 0">Bitiş: ${fmtDate(new Date(exp))} (${pkg.days} gün)</p></div>
 
       <div class="sumbox">
-        <div class="row sp"><span>4 · Liste fiyatı</span><b class="num">${money(list)}</b></div>
-        <div class="row sp" style="margin-top:8px"><span>5 · İndirim</span>
+        <div class="row sp"><span>Liste fiyatı</span><b class="num">${money(list)}</b></div>
+        <div class="row sp" style="margin-top:8px"><span>4 · İndirim</span>
           <input id="disc" type="number" min="0" max="${list}" step="50" value="${F.discount}"
             class="tin num" style="width:110px;text-align:right"></div>
-        <div class="row sp sumnet"><span><b>6 · Net satış</b></span><b class="num">${money(net)}</b></div>
+        <div class="row sp sumnet"><span><b>Net satış</b></span><b class="num">${money(net)}</b></div>
       </div>
 
-      <div class="field" style="margin-top:14px"><label for="col">7 · Tahsil edilen</label>
+      <div class="field" style="margin-top:14px"><label for="col">5 · Tahsil edilen</label>
         <input id="col" type="number" min="0" max="${net}" step="50" value="${F.collected}" class="num"></div>
 
       <div class="sumbox ${due>0?'warnbox':'okbox'}">
-        <div class="row sp"><span>8 · Kalan borç</span><b class="num">${money(due)}</b></div>
+        <div class="row sp"><span>Kalan borç</span><b class="num">${money(due)}</b></div>
       </div>
 
-      <div class="field" style="margin-top:14px"><label>9 · Ödeme yöntemi</label>
+      <div class="field" style="margin-top:14px"><label>6 · Ödeme yöntemi</label>
         <div class="chiprow">${PAY_METHODS.map(([k,l])=>
           `<button type="button" class="chip ${F.method===k?'on':''}" data-pm="${k}">${l}</button>`).join('')}</div></div>
 
-      ${due>0 ? `<div class="field"><label for="dd">10 · Son ödeme tarihi</label>
+      ${due>0 ? `<div class="field"><label for="dd">7 · Son ödeme tarihi</label>
         <input id="dd" type="date" value="${F.dueDate||iso(addDays(new Date(),14))}"></div>`:''}
 
       <div class="summary">

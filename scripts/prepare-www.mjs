@@ -12,7 +12,7 @@ fs.rmSync(www, { recursive: true, force: true });
 fs.mkdirSync(www);
 execFileSync('unzip', ['-oq', zip, '-d', www]);
 // Netlify-only / web-only files
-for (const f of ['_headers', 'sw.js']) fs.rmSync(path.join(www, f), { force: true });
+for (const f of ['_headers', 'sw.js', 'gizlilik.html']) fs.rmSync(path.join(www, f), { force: true });
 
 // Bundle the Archivo font so the app looks right offline
 const fontSrc = path.join(root, 'node_modules/@fontsource/archivo/files');
