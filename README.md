@@ -12,7 +12,7 @@ Her Play yüklemesinde `android/app/build.gradle` içindeki `versionCode`'u 1 ar
 - `main` dalına her push, GitHub Actions ile imzasız `app-release-unsigned.aab` üretir ve `aab-build` dalına koyar.
 - İmzalamak (anahtar GitHub'a hiç gitmez):
 
-      jarsigner -keystore pil-upload.keystore -signedjar pil-studyo-1.0.0.aab app-release-unsigned.aab pil-upload
+      jarsigner -keystore pil-upload.keystore -signedjar pil-studyo-1.0.1.aab app-release-unsigned.aab pil-upload
 
 - Alternatif: `android/keystore.properties` ve `android/pil-upload.keystore` dosyalarını koyup `gradle -p android bundleRelease`.
 
