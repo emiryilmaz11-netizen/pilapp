@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">PİL Stüdyo</string>
+    <string name="title_activity_main">PİL Stüdyo</string>
+    <string name="package_name">com.pilapp.studyo</string>
+    <string name="custom_url_scheme">com.pilapp.studyo</string>
+</resources>

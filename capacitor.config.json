@@ -1,0 +1,11 @@
+{
+  "appId": "com.pilapp.studyo",
+  "appName": "PİL Stüdyo",
+  "webDir": "www",
+  "backgroundColor": "#F8F6F3",
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": false,
+    "webContentsDebuggingEnabled": false
+  }
+}
